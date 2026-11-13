@@ -6,7 +6,7 @@ import os
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Generator
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -61,7 +61,6 @@ class ApplicationCreate(BaseModel):
     role: str = Field(min_length=1, max_length=160)
     source: str | None = Field(default=None, max_length=120)
     applied_on: date = Field(default_factory=date.today)
-    stage: Stage = Stage.SAVED
 
     @field_validator("company", "role", "source")
     @classmethod
@@ -106,12 +105,20 @@ class Analytics(BaseModel):
     by_stage: dict[str, int]
 
 
-def get_session(request: Request):
+def get_session(request: Request) -> Generator[Session, None, None]:
     with request.app.state.session_factory() as session:
         yield session
 
 
 SessionDependency = Annotated[Session, Depends(get_session)]
+
+
+def csv_safe(value: str | None) -> str:
+    if value is None:
+        return ""
+    if value.startswith(("=", "+", "-", "@", "\t", "\r")):
+        return f"'{value}"
+    return value
 
 
 def create_app(database_url: str | None = None) -> FastAPI:
@@ -201,9 +208,9 @@ def create_app(database_url: str | None = None) -> FastAPI:
         for item in rows:
             writer.writerow(
                 [
-                    item.company,
-                    item.role,
-                    item.source or "",
+                    csv_safe(item.company),
+                    csv_safe(item.role),
+                    csv_safe(item.source),
                     item.applied_on.isoformat(),
                     item.stage.value,
                 ]
@@ -236,7 +243,10 @@ def create_app(database_url: str | None = None) -> FastAPI:
         application = db.get(Application, application_id)
         if application is None:
             raise HTTPException(status_code=404, detail="Candidatura nao encontrada.")
-        if data.stage != application.stage and data.stage not in TRANSITIONS[application.stage]:
+        if (
+            data.stage != application.stage
+            and data.stage not in TRANSITIONS[application.stage]
+        ):
             raise HTTPException(
                 status_code=409,
                 detail=f"Transicao invalida: {application.stage} -> {data.stage}.",
@@ -249,14 +259,15 @@ def create_app(database_url: str | None = None) -> FastAPI:
     @app.get("/analytics", response_model=Analytics)
     def analytics(db: SessionDependency) -> Analytics:
         grouped = db.execute(
-            select(Application.stage, func.count())
-            .group_by(Application.stage)
+            select(Application.stage, func.count()).group_by(Application.stage)
         ).all()
         counts = {stage.value: count for stage, count in grouped}
         by_stage = {stage.value: counts.get(stage.value, 0) for stage in Stage}
         return Analytics(
             total=sum(by_stage.values()),
-            awaiting_response=by_stage[Stage.SAVED.value] + by_stage[Stage.APPLIED.value],
+            awaiting_response=(
+                by_stage[Stage.SAVED.value] + by_stage[Stage.APPLIED.value]
+            ),
             in_interview=by_stage[Stage.INTERVIEW.value],
             offers=by_stage[Stage.OFFER.value],
             rejected=by_stage[Stage.REJECTED.value],

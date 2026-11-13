@@ -69,6 +69,17 @@ def test_analytics_and_csv_export(client):
 def test_invalid_date_and_blank_required_fields_are_rejected(client):
     invalid_date = create_application(client, applied_on="not-a-date")
     blank_company = create_application(client, company="   ")
+    skipped_stage = create_application(client, stage="offer")
 
     assert invalid_date.status_code == 422
     assert blank_company.status_code == 422
+    assert skipped_stage.status_code == 422
+
+
+def test_csv_export_escapes_spreadsheet_formulas(client):
+    create_application(client, company="=1+1")
+
+    export = client.get("/applications/export.csv")
+
+    assert export.status_code == 200
+    assert "'=1+1" in export.text

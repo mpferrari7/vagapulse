@@ -51,7 +51,8 @@ Os dados ficam em um volume Docker. A API fica disponível em
 pytest -q
 ```
 
-Os testes cobrem cadastro e busca, validação de transições, métricas e exportação.
+Os testes cobrem cadastro e busca, validação de transições, indicadores e
+exportação CSV segura para uso em planilhas.
 
 ## Endpoints
 
