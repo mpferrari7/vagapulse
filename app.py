@@ -57,6 +57,8 @@ class Application(Base):
 
 
 class ApplicationCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     company: str = Field(min_length=1, max_length=120)
     role: str = Field(min_length=1, max_length=160)
     source: str | None = Field(default=None, max_length=120)
